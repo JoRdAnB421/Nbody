@@ -354,7 +354,7 @@ class Binary:
 
         self.plotReady=True
 
-    def plotPositions(self, figNum=1):
+    def plotPositions(self, figNum=1, quiverSize=1):
         '''
         Plot the position of the particles as well as the orbtial ellipse
         '''
@@ -383,12 +383,13 @@ class Binary:
         ax.plot(self.r2[0],self.r2[1],self.r2[2], 'o')
 
         # Plot velocities
-        quiverSize=0.5
         ax.quiver(self.r1[0],self.r1[1],self.r1[2], quiverSize*self.v1[0]/np.linalg.norm(self.v1),
                     quiverSize*self.v1[1]/np.linalg.norm(self.v1),quiverSize*self.v1[2]/np.linalg.norm(self.v1), color='tab:green',)
         ax.quiver(self.r2[0],self.r2[1],self.r2[2], quiverSize*self.v2[0]/np.linalg.norm(self.v2),
                     quiverSize*self.v2[1]/np.linalg.norm(self.v2),quiverSize*self.v2[2]/np.linalg.norm(self.v2), color='tab:green',)
-
+        
+        return fig, ax
+    
     def returnNBodyInput(self, GNBody=886.46):
         '''
         Converts the velocity into NBody Units and then prints a string
@@ -401,77 +402,247 @@ class Binary:
         print(f'{self.m1} {self.r1[0]} {self.r1[1]} {self.r1[2]} {self.v1[0]/v_convert} {self.v1[1]/v_convert} {self.v1[2]/v_convert}')
         print(f'{self.m2} {self.r2[0]} {self.r2[1]} {self.r2[2]} {self.v2[0]/v_convert} {self.v2[1]/v_convert} {self.v2[2]/v_convert}')
 
+class Triple():
+    '''
+    initialises a triple system
+    '''
+    plotReadyTrip=False
+
+    def __init__(self, m1,m2,m3, *args, input_type='Orbital_Elements'):
+        self.plotReady=False
+
+        # Define the 
+        self.m1 = m1
+        self.m2 = m2
+        self.mtot = self.m1+self.m2
+        self.m3 = m3
+
+        # Entering as orbital elements or state vector
+        if input_type=='Orbital_Elements':
+            self.binary_inner = Binary(m1, m2, *args[:7])
+            self.binary_out = Binary(self.mtot, m3, *args[7:])
+
+            ### Euler angles for the outer orbit
+            self.Omega = args[10]
+            self.omega = args[11]
+            self.inc = args[9]
+
+
+        elif input_type=='State_Vector':
+            print('not working yet SORRY!!')
+            raise
+            self.r1, self.v1, self.r2, self.v2 , self.r3, self.v3 = args
+            self.binary_inner = Binary(m1, m2, *args[:4], input_type='State_Vector')
+
+            outerargs = []
+            self.binary_outer = Binary(self.mtot, m3, args[:4], input_type='State_Vector')
+
+        else:
+            raise ValueError("Unknown input type")
+        return
+
+    def ref_plane_2_orb_plane(self,vec):
+        '''
+        Rotate from the equatorital/reference plane to the orbital plane
+
+        Inertial coordinate frame (Equatorial plane defined by I,J)
+        ----------------------------
+        I = direction of vernal equinox
+        J = perp to I
+        K = perp to reference plane
+
+        Orbtial Frame (Orbital plane defined by x, y) 
+        ----------------------------
+        x = direction to pericenter
+        y = perp to x and z
+        z = perp to orbital plane
+
+        Equations
+        ----------------------------
+        X = x1*I + x2*J + x3*K
+        Y = y1*I + y2*J + y3*K
+        Z = z1*I + z2*J + z3*K
+
+
+        Performs Rotation
+
+        |x1 x2 x3|      |cos(omega)  sin(omega) 0||1     0         0   ||cos(Omega)  sin(Omega) 0|
+        |y1 y2 y3|   =  |-sin(omega) cos(omega) 0||0 cos(inc)  sin(inc)||-sin(Omega) cos(Omega) 0|
+        |z1 z2 z3|      |   0          0        1||0 -sin(inc) cos(inc)||   0          0        1|
+        '''
+
+        # Define Rotation matrices
+        rotomg = np.array([[np.cos(self.omega),  np.sin(self.omega), 0],
+                            [-np.sin(self.omega), np.cos(self.omega), 0],
+                            [0, 0, 1]
+                            ]) # Argument of periapsis rotation
+        
+        rotInc = np.array([[1, 0, 0],
+                           [0, np.cos(self.inc), np.sin(self.inc)],
+                           [0, -np.sin(self.inc), np.cos(self.inc)]
+                           ]) # Inclination rotation
+
+        rotOmg = np.array([[np.cos(self.Omega), np.sin(self.Omega),  0],
+                           [-np.sin(self.Omega), np.cos(self.Omega), 0],
+                           [0, 0, 1]
+                           ]) # Longitude of Ascending Node
+        
+        # Apply numerical threshold to handle floating point inaccuracies
+        rotomg = np.where(np.isclose(rotomg, 0, atol=1e-10), 0, rotomg)
+        rotInc = np.where(np.isclose(rotInc, 0, atol=1e-10), 0, rotInc)
+        rotOmg = np.where(np.isclose(rotOmg, 0, atol=1e-10), 0, rotOmg)
+
+        # Perform the rotations 
+        totRot = np.matmul(rotOmg, np.matmul(rotInc, rotomg))
+        
+        # Ensure shape of vector for cross produt
+        if vec.shape!=(3,1): vec=vec.reshape(3,1)
+
+        # Rotate vector
+        newVec = np.cross(totRot, vec)
+        
+        return newVec
+    
+    def orb_plane_2_ref_plane(self,vec):
+        '''
+        Rotate from the orbital plane plane to the equatorital/reference
+
+        Orbtial Frame (Orbital plane defined by x, y) 
+        ----------------------------
+        x = direction to pericenter
+        y = perp to x and z
+        z = perp to orbital plane
+
+        
+        Inertial coordinate frame (Equatorial plane defined by I,J)
+        ----------------------------
+        I = direction of vernal equinox
+        J = perp to I
+        K = perp to reference plane
+
+        Equations
+        ----------------------------
+        I = i1*X + i2*Y + i3*Z
+        J = j1*X + j2*Y + j3*Z
+        K = k1*X + k2*Y + k3*Z
+
+        Performs Rotation
+
+        |i1 i2 i3|      |cos(Omega) -sin(Omega) 0||1     0         0   ||cos(omega) -sin(omega) 0|
+        |j1 j2 j3|   =  |sin(Omega)  cos(Omega) 0||0 cos(inc) -sin(inc)||sin(omega)  cos(omega) 0|
+        |k1 k2 k3|      |   0          0        1||0 sin(inc)  cos(inc)||   0          0        1|
+        '''
+
+        # Define Rotation matrices
+        rotOmg = np.array([[np.cos(self.Omega),  -np.sin(self.Omega), 0],
+                           [np.sin(self.Omega), np.cos(self.Omega), 0],
+                           [0, 0, 1]
+                           ]) # Argument of periapsis rotation
+        
+        rotInc = np.array([[1, 0, 0],
+                           [0, np.cos(self.inc), -np.sin(self.inc)],
+                           [0, np.sin(self.inc), np.cos(self.inc)]
+                           ]) # Inclination rotation
+
+        rotomg = np.array([[np.cos(self.omega), -np.sin(self.omega),  0],
+                           [np.sin(self.omega), np.cos(self.omega), 0],
+                           [0, 0, 1]
+                           ]) # Longitude of Ascending Node
+        
+        # Apply numerical threshold to handle floating point inaccuracies
+        rotomg = np.where(np.isclose(rotomg, 0, atol=1e-10), 0, rotomg)
+        rotInc = np.where(np.isclose(rotInc, 0, atol=1e-10), 0, rotInc)
+        rotOmg = np.where(np.isclose(rotOmg, 0, atol=1e-10), 0, rotOmg)
+
+        # Perform the rotations 
+        totRot = np.matmul(rotomg, np.matmul(rotInc, rotOmg))
+
+        # Rotate vector
+        newVec = np.dot(totRot, vec)
+        
+        return newVec
+    
+    def calc_state_vector(self):
+        '''
+        Computes the state vector for the triple system
+        '''
+
+        # First create the inner binary to get r1, r2, v1, v2
+        self.binary_inner.calc_state_vector()
+        _,_,self.r1,self.v1,self.r2,self.v2 = self.binary_inner.returnState()
+
+        # Then create the outer binary to get r3, v3
+        self.binary_out.calc_state_vector()
+        _,_,self.rinCOM,self.vinCOM,self.r3,self.v3 = self.binary_out.returnState()
+
+        self.plotReadyTrip=True
+
+    def plotTriple(self):
+        '''
+        Plots the initial positions of particles and orbital ellipse
+        '''
+        fig, ax = self.binary_inner.plotPositions(1, quiverSize=5)
+        
+        # Plotting orbital ellipse in 3D
+        phi = np.linspace(0,2*np.pi, 100)
+        a = args[8]
+        b = np.sqrt(a**2*(1-args[7]**2))
+
+        x = a*np.cos(phi); y = b*np.sin(phi); z = np.zeros_like(phi)
+        vec = np.vstack((x, y, z))
+
+        # Rotate ellipse
+        newvec = self.orb_plane_2_ref_plane(vec)
+
+        ax.plot(newvec[0,:], newvec[1,:], newvec[2,:], color='tab:purple')
+
+        # ax.plot(r1[0],r1[1],r1[2], 'o')
+        ax.plot(self.r3[0],self.r3[1],self.r3[2], 'o')
+        quiverSize=5
+        ax.quiver(self.r3[0],self.r3[1],self.r3[2], quiverSize*self.v3[0]/np.linalg.norm(self.v3),quiverSize* 
+                  self.v3[1]/np.linalg.norm(self.v3),quiverSize*self.v3[2]/np.linalg.norm(self.v3), color='tab:green',)
+    
+    def returnNBodyInput(self, GNBody=886.46):
+        '''
+        prints state vector ready for NBody code
+        '''
+        self.binary_inner.returnNBodyInput()
+
+        v_convert = np.sqrt(GNBody)
+        print(f'{self.m3} {self.r3[0]} {self.r3[1]} {self.r3[2]} {self.v3[0]/v_convert} {self.v3[1]/v_convert} {self.v3[2]/v_convert}')
+
+
 if __name__ =="__main__":
     # Ecc, semi, incl, Omega, omega, theta, t0
     argsOrb = [0.5, 5, np.deg2rad(0), 0, np.deg2rad(120), 0., 0]
     m1=0.3
     m2=1.4
-    binary = Binary(m1, m2, *argsOrb)
+    # binary = Binary(m1, m2, *argsOrb)
 
-    binary.calc_state_vector()
-    print(binary)
+    # binary.calc_state_vector()
+    # print(binary)
     
-    binary.plotPositions()
-    plt.show()
+    # binary.plotPositions()
+    # plt.show()
+
+    # ### Print values for binary NBody
+    # binary.returnNBodyInput()
 
 
-
-    ### Print values for binary NBody
-    binary.returnNBodyInput()
-
-
-    input()
-    #### Add triple
+    ############## Create a triple
     # Ecc, semi, incl, Omega, omega, theta, t0
-    tripargs = [0, 10, np.deg2rad(70), 0, 0 , 0, 0]
-    m3 = 0.01
-    binaryOut = Binary(mtot, m3, *tripargs)
+    argsinner = [0.5, 5, np.deg2rad(0), 0, np.deg2rad(120), 0., 0]
+    argsouter = [0, 10, np.deg2rad(70), 0, 0 , 0, 0]
+    args = np.append(argsinner, argsouter)
+    m1=0.3
+    m2=1.4
+    m3=0.01
 
-    binaryOut.calc_state_vector()
-    binaryOut.printState()
+    triple = Triple(m1,m2,m3,*args)
+    triple.calc_state_vector()
 
-    # Get state
-    outstate = binaryOut.returnState()
-    mtot=outstate[0]
-    m3 = outstate[1]
-    rinCOM = outstate[2]
-    vinCOM = outstate[3]
-    r3 = outstate[4]
-    v3 = outstate[5]
+    triple.plotTriple()
 
-    ### Correct inner binary motion to new COM frame
-    # r1 += rinCOM
-    # r2 += rinCOM
-    # v1 += vinCOM
-    # v2 += vinCOM
-
-
-    #### Algorthimic Regularisation input
-    G = 886.46 # AU /Msol km^2/s^2
-    v_convert = np.sqrt(G/(1))
-
-    print('Input for Algorithmic Regularisation\n')
-    print(m3, *r3, *v3/v_convert)
-    print(m1, *r1, *v1/v_convert)
-    print(m2, *r2, *v2/v_convert)
-
-
-    # Plotting orbital ellipse in 3D
-    phi = np.linspace(0,2*np.pi, 100)
-    a = tripargs[1]
-    b = np.sqrt(a**2*(1-tripargs[0]**2))
-
-    x = a*np.cos(phi); y = b*np.sin(phi); z = np.zeros_like(phi)
-    vec = np.vstack((x, y, z))
-
-    # Rotate ellipse
-    newvec = Rot_orb_2_ref(vec, tripargs[3], tripargs[2], tripargs[4])
-
-    ax.plot(newvec[0,:], newvec[1,:], newvec[2,:], color='tab:purple')
-
-    # ax.plot(r1[0],r1[1],r1[2], 'o')
-    ax.plot(r3[0],r3[1],r3[2], 'o')
-    ax.quiver(r3[0],r3[1],r3[2], 10*v3[0]/np.linalg.norm(v3),10* v3[1]/np.linalg.norm(v3),10*v3[2]/np.linalg.norm(v3), color='tab:green',)
-
+    triple.returnNBodyInput()
     plt.show()
-
+    
