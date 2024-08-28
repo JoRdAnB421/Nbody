@@ -10,6 +10,8 @@ class Binary:
     AU_yr_2_km_s = 4.744 # Convert from AU/year to km/s
 
     def __init__(self, m1, m2, *args, input_type='Orbital_Elements'):
+        self.plotReady=False
+
         # Define the gravitation parameter mu
         self.m1 = m1
         self.m2 = m2
@@ -20,11 +22,11 @@ class Binary:
             self.ecc, self.semi, self.inc, self.Omega, self.omega, self.theta, self.t0 = args
         
         elif input_type=='State_Vector':
-            self.rorb1, self.vorb1, self.rorb2, self.vorb2 = args
+            self.r1, self.v1, self.r2, self.v2 = args
 
             # Convert velocities to AU/year
-            self.vorb1/=self.AU_yr_2_km_s
-            self.vorb2/=self.AU_yr_2_km_s
+            self.v1/=self.AU_yr_2_km_s
+            self.v2/=self.AU_yr_2_km_s
 
         else:
             raise ValueError("Unknown input type")
@@ -211,40 +213,12 @@ class Binary:
 
         return rorb, vorb
 
-    def calc_state_vector(self):
-        '''
-        Computes the state vector from the orbital elements
-        
-        Position and Velocity in orbital plane
-        ------------------------------------------------
-        vorb = mu/h * [-sin(theta)X + (e+cos(theta))Y]
-        rorb = h^2/mu * 1/(1+e*cos(theta)) * [cos(theta)X + sin(theta)Y]
-        '''
-        # Calculate specific angular momentum h from semi and ecc
-        hsq = self.semi * self.mu * (1+self.ecc)
-
-        # Define rorb and vorb
-        rorb = np.array([np.cos(self.theta), np.sin(self.theta),0]) * hsq/self.mu * 1/(1+self.ecc*np.cos(self.theta))
-        vorb = np.array([-np.sin(self.theta), (self.ecc + np.cos(self.theta)),0]) * self.mu/hsq**0.5
-
-        # Rotate into reference frame
-        rinert = self.orb_plane_2_ref_plane(rorb)
-        vinert = self.orb_plane_2_ref_plane(vorb)
-    
-        # transform into COM frame 
-        # self.rorb1, self.rorb2, self.vorb1, self.vorb2 = self.transform_2_COM_frame(rinert, vinert)
-        self.rorb1, self.vorb1 = rinert, vinert
-        self.rorb2, self.vorb2 = -self.rorb1, -self.vorb1
-        # Convert velocities to km/s
-        self.vorb1*=self.AU_yr_2_km_s
-        self.vorb2*=self.AU_yr_2_km_s
-
-    def printState(self):
+    def __repr__(self):
         '''
         Prints the complete state vector if it exists
         '''
         try:
-            print(f'Body 1   :   M1 = {self.m1} Msol    :    R1 = {self.rorb1} AU    :    V1 = {self.vorb1} km/s\nBody 2   :   M2 = {self.m2} Msol    :    R2 = {self.rorb2} AU    :    V2 = {self.vorb2} km/s\n')
+            return (f'Body 1   :   M1 = {self.m1} Msol    :    R1 = {self.r1} AU    :    V1 = {self.v1} km/s\nBody 2   :   M2 = {self.m2} Msol    :    R2 = {self.r2} AU    :    V2 = {self.v2} km/s\n')
         except:
             return 'State vector not yet calculated or input'
     
@@ -253,7 +227,7 @@ class Binary:
         Returns the state vector with form :
         m1, m2, rorb1, vorb1, rorb2, vorb2
         '''
-        return [self.m1, self.m2, self.rorb1, self.vorb1, self.rorb2, self.vorb2]
+        return [self.m1, self.m2, self.r1, self.v1, self.r2, self.v2]
 
     def printOrbElems(self):
         '''
@@ -287,7 +261,7 @@ class Binary:
         # First convert into comoving frame of M1
         # rorb, vorb = self.transform_2_comoving_frame(self.rorb2, self.vorb2)
 
-        rorb, vorb = self.rorb1, self.vorb1
+        rorb, vorb = self.r1, self.v1
 
         # For use later
         r_norm = np.linalg.norm(rorb)
@@ -346,36 +320,86 @@ class Binary:
         self.Omega=Omega
         self.omega=omega
         self.theta=theta
+        self.plotReady=True
 
         return ecc, semi, inc, Omega, omega, theta
 
+    def calc_state_vector(self):
+        '''
+        Computes the state vector from the orbital elements
+        
+        Position and Velocity in orbital plane
+        ------------------------------------------------
+        vorb = mu/h * [-sin(theta)X + (e+cos(theta))Y]
+        rorb = h^2/mu * 1/(1+e*cos(theta)) * [cos(theta)X + sin(theta)Y]
+        '''
+        # Calculate specific angular momentum h from semi and ecc
+        hsq = self.semi * self.mu * (1+self.ecc)
 
-def Rot_orb_2_ref(vec, Omega, inc, omega):
-    # Define Rotation matrices
-    rotOmg = np.array([[np.cos(Omega),  -np.sin(Omega), 0],
-                    [np.sin(Omega), np.cos(Omega), 0],
-                    [0, 0, 1]
-                    ]) # Argument of periapsis rotation
-            
-    rotInc = np.array([[1, 0, 0],
-                    [0, np.cos(inc), -np.sin(inc)],
-                    [0, np.sin(inc), np.cos(inc)]
-                    ]) # Inclination rotation
-    rotomg = np.array([[np.cos(omega), -np.sin(omega),  0],
-                    [np.sin(omega), np.cos(omega), 0],
-                    [0, 0, 1]
-                    ]) # Longitude of Ascending Node
-            
-    # Apply numerical threshold to handle floating point inaccuracies
-    rotomg = np.where(np.isclose(rotomg, 0, atol=1e-10), 0, rotomg)
-    rotInc = np.where(np.isclose(rotInc, 0, atol=1e-10), 0, rotInc)
-    rotOmg = np.where(np.isclose(rotOmg, 0, atol=1e-10), 0, rotOmg)
-    # Perform the rotations 
-    totRot = np.matmul(rotomg, np.matmul(rotInc, rotOmg))
-    # Rotate vector
-    newVec = np.dot(totRot, vec)
+        # Define rorb and vorb
+        rorb = np.array([np.cos(self.theta), np.sin(self.theta),0]) * hsq/self.mu * 1/(1+self.ecc*np.cos(self.theta))
+        vorb = np.array([-np.sin(self.theta), (self.ecc + np.cos(self.theta)),0]) * self.mu/hsq**0.5
 
-    return newVec
+        # Rotate into reference frame
+        rinert = self.orb_plane_2_ref_plane(rorb)
+        vinert = self.orb_plane_2_ref_plane(vorb)
+    
+        # transform into COM frame 
+        # self.rorb1, self.rorb2, self.vorb1, self.vorb2 = self.transform_2_COM_frame(rinert, vinert)
+        self.r1, self.v1 = rinert, vinert
+        self.r2, self.v2 = -self.r1, -self.v1
+        # Convert velocities to km/s
+        self.v1*=self.AU_yr_2_km_s
+        self.v2*=self.AU_yr_2_km_s
+
+        self.plotReady=True
+
+    def plotPositions(self, figNum=1):
+        '''
+        Plot the position of the particles as well as the orbtial ellipse
+        '''
+        if not self.plotReady: 
+            print('Need to calculate State Vector / Orbital Elements')
+            return
+        
+        fig=plt.figure(figNum)
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Plotting orbital ellipse in 3D
+        phi = np.linspace(0,2*np.pi, 100)
+        a = self.semi
+        b = np.sqrt(a**2*(1-self.ecc**2))
+
+        x = a*np.cos(phi); y = b*np.sin(phi); z = np.zeros_like(phi)
+        vec = np.vstack((x, y, z))
+
+        # Rotate ellipse
+        newvec = self.orb_plane_2_ref_plane(vec)
+
+        # ax.plot(vec[0,:], vec[1,:], vec[2,:], color='tab:red')
+        ax.plot(newvec[0,:], newvec[1,:], newvec[2,:], color='black')
+
+        ax.plot(self.r1[0],self.r1[1],self.r1[2], 'o')
+        ax.plot(self.r2[0],self.r2[1],self.r2[2], 'o')
+
+        # Plot velocities
+        quiverSize=0.5
+        ax.quiver(self.r1[0],self.r1[1],self.r1[2], quiverSize*self.v1[0]/np.linalg.norm(self.v1),
+                    quiverSize*self.v1[1]/np.linalg.norm(self.v1),quiverSize*self.v1[2]/np.linalg.norm(self.v1), color='tab:green',)
+        ax.quiver(self.r2[0],self.r2[1],self.r2[2], quiverSize*self.v2[0]/np.linalg.norm(self.v2),
+                    quiverSize*self.v2[1]/np.linalg.norm(self.v2),quiverSize*self.v2[2]/np.linalg.norm(self.v2), color='tab:green',)
+
+    def returnNBodyInput(self, GNBody=886.46):
+        '''
+        Converts the velocity into NBody Units and then prints a string
+        string which is in the form required for the NBody input
+        
+        GNBody = Gravitational constant conversion into km^2/s^2 AU/Msol
+        '''
+        
+        v_convert = np.sqrt(GNBody)
+        print(f'{self.m1} {self.r1[0]} {self.r1[1]} {self.r1[2]} {self.v1[0]/v_convert} {self.v1[1]/v_convert} {self.v1[2]/v_convert}')
+        print(f'{self.m2} {self.r2[0]} {self.r2[1]} {self.r2[2]} {self.v2[0]/v_convert} {self.v2[1]/v_convert} {self.v2[2]/v_convert}')
 
 if __name__ =="__main__":
     # Ecc, semi, incl, Omega, omega, theta, t0
@@ -385,62 +409,18 @@ if __name__ =="__main__":
     binary = Binary(m1, m2, *argsOrb)
 
     binary.calc_state_vector()
-    binary.printState()
-
-    ##### Checking
-    statevect = binary.returnState()
-
-    # Defines inner binary
-    mtot = statevect[0]+statevect[1]
-    m1 = statevect[0]
-    m2 = statevect[1]
-    r1 = statevect[2]
-    v1 = statevect[3]
-    r2 = statevect[4]
-    v2 = statevect[5]
+    print(binary)
     
-    ##### Test
-    args = [r1, v1, r2, v2]
-    print(args)
-    bin_test = Binary(m1,m2,*args, input_type='State_Vector')
-    bin_test.calc_orbital_elems()
-
-    bin_test.printOrbElems()
-
-    fig=plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-
-    # Plotting orbital ellipse in 3D
-    phi = np.linspace(0,2*np.pi, 100)
-    a = argsOrb[1]
-    b = np.sqrt(a**2*(1-argsOrb[0]**2))
-
-    x = a*np.cos(phi); y = b*np.sin(phi); z = np.zeros_like(phi)
-    vec = np.vstack((x, y, z))
-
-    # Rotate ellipse
-    newvec = Rot_orb_2_ref(vec, argsOrb[3], argsOrb[2], argsOrb[4])
-
-    # ax.plot(vec[0,:], vec[1,:], vec[2,:], color='tab:red')
-    ax.plot(newvec[0,:], newvec[1,:], newvec[2,:], color='black')
-
-    ax.plot(r1[0],r1[1],r1[2], 'o')
-    ax.plot(r2[0],r2[1],r2[2], 'o')
-    ax.quiver(r1[0],r1[1],r1[2], 2*v1[0]/np.linalg.norm(v1),2* v1[1]/np.linalg.norm(v1),2*v1[2]/np.linalg.norm(v1), color='tab:green',)
-    ax.quiver(r2[0],r2[1],r2[2], 2*v2[0]/np.linalg.norm(v2),2* v2[1]/np.linalg.norm(v2),2*v2[2]/np.linalg.norm(v2), color='tab:green',)
+    binary.plotPositions()
+    plt.show()
 
 
 
-    ### Print values for binary
-    G = 886.46 # AU /Msol km^2/s^2
-    v_convert = lambda M, R : np.sqrt(G*M/(2*R))
-    v_convert = np.sqrt(G/(1))
+    ### Print values for binary NBody
+    binary.returnNBodyInput()
 
 
-    print(m1, *r1, *v1/v_convert)
-    print(m2, *r2, *v2/v_convert)
-    print()
-
+    input()
     #### Add triple
     # Ecc, semi, incl, Omega, omega, theta, t0
     tripargs = [0, 10, np.deg2rad(70), 0, 0 , 0, 0]
