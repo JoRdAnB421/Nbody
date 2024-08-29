@@ -64,18 +64,18 @@ class Binary:
         '''
 
         # Define Rotation matrices
-        rotomg = np.array([[np.cos(self.omega),  np.sin(self.omega), 0],
-                            [-np.sin(self.omega), np.cos(self.omega), 0],
+        rotomg = np.array([[np.cos(-self.omega),  np.sin(-self.omega), 0],
+                            [-np.sin(-self.omega), np.cos(-self.omega), 0],
                             [0, 0, 1]
                             ]) # Argument of periapsis rotation
         
         rotInc = np.array([[1, 0, 0],
-                           [0, np.cos(self.inc), np.sin(self.inc)],
-                           [0, -np.sin(self.inc), np.cos(self.inc)]
+                           [0, np.cos(-self.inc), np.sin(-self.inc)],
+                           [0, -np.sin(-self.inc), np.cos(-self.inc)]
                            ]) # Inclination rotation
 
-        rotOmg = np.array([[np.cos(self.Omega), np.sin(self.Omega),  0],
-                           [-np.sin(self.Omega), np.cos(self.Omega), 0],
+        rotOmg = np.array([[np.cos(-self.Omega), np.sin(-self.Omega),  0],
+                           [-np.sin(-self.Omega), np.cos(-self.Omega), 0],
                            [0, 0, 1]
                            ]) # Longitude of Ascending Node
         
@@ -85,13 +85,9 @@ class Binary:
         rotOmg = np.where(np.isclose(rotOmg, 0, atol=1e-10), 0, rotOmg)
 
         # Perform the rotations 
-        totRot = np.matmul(rotOmg, np.matmul(rotInc, rotomg))
+        totRot = rotomg@rotInc@rotOmg
         
-        # Ensure shape of vector for cross produt
-        if vec.shape!=(3,1): vec=vec.reshape(3,1)
-
-        # Rotate vector
-        newVec = np.cross(totRot, vec)
+        newVec = vec@totRot.T
         
         return newVec
     
@@ -126,8 +122,8 @@ class Binary:
         '''
 
         # Define Rotation matrices
-        rotOmg = np.array([[np.cos(self.Omega),  -np.sin(self.Omega), 0],
-                           [np.sin(self.Omega), np.cos(self.Omega), 0],
+        rotOmg = np.array([[np.cos(-self.Omega),  -np.sin(-self.Omega), 0],
+                           [np.sin(-self.Omega), np.cos(-self.Omega), 0],
                            [0, 0, 1]
                            ]) # Argument of periapsis rotation
         
@@ -136,8 +132,8 @@ class Binary:
                            [0, np.sin(self.inc), np.cos(self.inc)]
                            ]) # Inclination rotation
 
-        rotomg = np.array([[np.cos(self.omega), -np.sin(self.omega),  0],
-                           [np.sin(self.omega), np.cos(self.omega), 0],
+        rotomg = np.array([[np.cos(-self.omega), -np.sin(-self.omega),  0],
+                           [np.sin(-self.omega), np.cos(-self.omega), 0],
                            [0, 0, 1]
                            ]) # Longitude of Ascending Node
         
@@ -147,10 +143,9 @@ class Binary:
         rotOmg = np.where(np.isclose(rotOmg, 0, atol=1e-10), 0, rotOmg)
 
         # Perform the rotations 
-        totRot = np.matmul(rotomg, np.matmul(rotInc, rotOmg))
-
-        # Rotate vector
-        newVec = np.dot(totRot, vec)
+        totRot = rotOmg@rotInc@rotomg
+        
+        newVec = vec@totRot.T
         
         return newVec
     
@@ -334,7 +329,7 @@ class Binary:
         rorb = h^2/mu * 1/(1+e*cos(theta)) * [cos(theta)X + sin(theta)Y]
         '''
         # Calculate specific angular momentum h from semi and ecc
-        hsq = self.semi * self.mu * (1+self.ecc)
+        hsq = self.mu*self.semi*(1-self.ecc**2)
 
         # Define rorb and vorb
         rorb = np.array([np.cos(self.theta), np.sin(self.theta),0]) * hsq/self.mu * 1/(1+self.ecc*np.cos(self.theta))
@@ -343,11 +338,14 @@ class Binary:
         # Rotate into reference frame
         rinert = self.orb_plane_2_ref_plane(rorb)
         vinert = self.orb_plane_2_ref_plane(vorb)
-    
+
+        self.m1frac = self.m2/(self.m1+self.m2)
+        self.m2frac = self.m1/(self.m1+self.m2)
+
         # transform into COM frame 
-        # self.rorb1, self.rorb2, self.vorb1, self.vorb2 = self.transform_2_COM_frame(rinert, vinert)
-        self.r1, self.v1 = rinert, vinert
-        self.r2, self.v2 = -self.r1, -self.v1
+        self.r1, self.v1 = -rinert*self.m1frac, -vinert*self.m1frac
+        self.r2, self.v2 = rinert*self.m2frac, vinert*self.m2frac
+
         # Convert velocities to km/s
         self.v1*=self.AU_yr_2_km_s
         self.v2*=self.AU_yr_2_km_s
@@ -365,19 +363,32 @@ class Binary:
         fig=plt.figure(figNum)
         ax = fig.add_subplot(111, projection='3d')
 
-        # Plotting orbital ellipse in 3D
-        phi = np.linspace(0,2*np.pi, 100)
-        a = self.semi
-        b = np.sqrt(a**2*(1-self.ecc**2))
+        # Plotting orbital ellipses in 3D
+        phi = np.linspace(0,2*np.pi, 1000)
+        
+        # Adjust semi major axis for both orbits
+        a1 = self.semi * self.m1frac
+        a2 = self.semi * self.m2frac
 
-        x = a*np.cos(phi); y = b*np.sin(phi); z = np.zeros_like(phi)
-        vec = np.vstack((x, y, z))
+        b1 = np.sqrt(a1**2*(1-self.ecc**2))
+        b2 = np.sqrt(a2**2*(1-self.ecc**2))
 
+        c1 = a1*self.ecc
+        c2 = a2*self.ecc
+
+        x1 = a1*np.cos(phi)+c1; y1 = b1*np.sin(phi); z1 = np.zeros_like(phi)
+        vec1 = np.vstack((x1, y1, z1))
+        
+        x2 = a2*np.cos(phi)-c2; y2 = b2*np.sin(phi); z2 = np.zeros_like(phi)
+        vec2 = np.vstack((x2, y2, z2))
+        
         # Rotate ellipse
-        newvec = self.orb_plane_2_ref_plane(vec)
+        newvec1 = np.array([self.orb_plane_2_ref_plane(i) for i in vec1.T]).T
+        newvec2 = np.array([self.orb_plane_2_ref_plane(i) for i in vec2.T]).T
 
         # ax.plot(vec[0,:], vec[1,:], vec[2,:], color='tab:red')
-        ax.plot(newvec[0,:], newvec[1,:], newvec[2,:], color='black')
+        ax.plot(newvec1[0,:], newvec1[1,:], newvec1[2,:], color='black')
+        ax.plot(newvec2[0,:], newvec2[1,:], newvec2[2,:], color='grey')
 
         ax.plot(self.r1[0],self.r1[1],self.r1[2], 'o')
         ax.plot(self.r2[0],self.r2[1],self.r2[2], 'o')
@@ -405,6 +416,13 @@ class Binary:
 class Triple():
     '''
     initialises a triple system
+
+    If givinig orbital parameters give in args in following form 
+
+    inner binary = Ecc, semi, incl, Omega, omega, theta, t0
+    tertirary-InnerCOM Binary = Ecc, semi, incl, Omega, omega, theta, t0
+
+    args [List or array] = inner binary + tertirary-InnerCOM Binary 
     '''
     plotReadyTrip=False
 
@@ -472,8 +490,8 @@ class Triple():
         '''
 
         # Define Rotation matrices
-        rotomg = np.array([[np.cos(self.omega),  np.sin(self.omega), 0],
-                            [-np.sin(self.omega), np.cos(self.omega), 0],
+        rotomg = np.array([[np.cos(-self.omega),  np.sin(-self.omega), 0],
+                            [-np.sin(-self.omega), np.cos(-self.omega), 0],
                             [0, 0, 1]
                             ]) # Argument of periapsis rotation
         
@@ -482,8 +500,8 @@ class Triple():
                            [0, -np.sin(self.inc), np.cos(self.inc)]
                            ]) # Inclination rotation
 
-        rotOmg = np.array([[np.cos(self.Omega), np.sin(self.Omega),  0],
-                           [-np.sin(self.Omega), np.cos(self.Omega), 0],
+        rotOmg = np.array([[np.cos(-self.Omega), np.sin(-self.Omega),  0],
+                           [-np.sin(-self.Omega), np.cos(-self.Omega), 0],
                            [0, 0, 1]
                            ]) # Longitude of Ascending Node
         
@@ -534,8 +552,8 @@ class Triple():
         '''
 
         # Define Rotation matrices
-        rotOmg = np.array([[np.cos(self.Omega),  -np.sin(self.Omega), 0],
-                           [np.sin(self.Omega), np.cos(self.Omega), 0],
+        rotOmg = np.array([[np.cos(-self.Omega),  -np.sin(-self.Omega), 0],
+                           [np.sin(-self.Omega), np.cos(-self.Omega), 0],
                            [0, 0, 1]
                            ]) # Argument of periapsis rotation
         
@@ -544,8 +562,8 @@ class Triple():
                            [0, np.sin(self.inc), np.cos(self.inc)]
                            ]) # Inclination rotation
 
-        rotomg = np.array([[np.cos(self.omega), -np.sin(self.omega),  0],
-                           [np.sin(self.omega), np.cos(self.omega), 0],
+        rotomg = np.array([[np.cos(-self.omega), -np.sin(-self.omega),  0],
+                           [np.sin(-self.omega), np.cos(-self.omega), 0],
                            [0, 0, 1]
                            ]) # Longitude of Ascending Node
         
@@ -555,10 +573,10 @@ class Triple():
         rotOmg = np.where(np.isclose(rotOmg, 0, atol=1e-10), 0, rotOmg)
 
         # Perform the rotations 
-        totRot = np.matmul(rotomg, np.matmul(rotInc, rotOmg))
-
-        # Rotate vector
-        newVec = np.dot(totRot, vec)
+        totRot = rotOmg@rotInc@rotomg
+        
+        newVec = vec@totRot.T
+        
         
         return newVec
     
@@ -581,18 +599,23 @@ class Triple():
         '''
         Plots the initial positions of particles and orbital ellipse
         '''
+        if not self.plotReadyTrip: 
+            print('Generate state vectors first')
+            return
+        
         fig, ax = self.binary_inner.plotPositions(1, quiverSize=5)
         
         # Plotting orbital ellipse in 3D
         phi = np.linspace(0,2*np.pi, 100)
-        a = args[8]
+        a = args[8] * self.mtot/(self.m3+self.mtot)
         b = np.sqrt(a**2*(1-args[7]**2))
-
-        x = a*np.cos(phi); y = b*np.sin(phi); z = np.zeros_like(phi)
+        c = a*args[7]
+        x = a*np.cos(phi)-c; y = b*np.sin(phi); z = np.zeros_like(phi)
         vec = np.vstack((x, y, z))
 
         # Rotate ellipse
-        newvec = self.orb_plane_2_ref_plane(vec)
+        newvec = np.array([self.orb_plane_2_ref_plane(i) for i in vec.T]).T
+
 
         ax.plot(newvec[0,:], newvec[1,:], newvec[2,:], color='tab:purple')
 
@@ -614,29 +637,29 @@ class Triple():
 
 if __name__ =="__main__":
     # Ecc, semi, incl, Omega, omega, theta, t0
-    argsOrb = [0.5, 5, np.deg2rad(0), 0, np.deg2rad(120), 0., 0]
-    m1=0.3
-    m2=1.4
-    # binary = Binary(m1, m2, *argsOrb)
+    argsOrb = [0.5, 5, np.deg2rad(0), 0, np.deg2rad(120), 1., 0]
+    m1=1
+    m2=0.5
+    binary = Binary(m1, m2, *argsOrb)
 
-    # binary.calc_state_vector()
-    # print(binary)
+    binary.calc_state_vector()
+    print(binary)
     
-    # binary.plotPositions()
-    # plt.show()
+    binary.plotPositions()
+    plt.show()
 
-    # ### Print values for binary NBody
+    ### Print values for binary NBody
     # binary.returnNBodyInput()
 
 
     ############## Create a triple
     # Ecc, semi, incl, Omega, omega, theta, t0
-    argsinner = [0.5, 5, np.deg2rad(0), 0, np.deg2rad(120), 0., 0]
-    argsouter = [0, 10, np.deg2rad(70), 0, 0 , 0, 0]
+    argsinner = [0.8, 5, np.deg2rad(24), np.pi/3, np.deg2rad(120), 4.3, 0]
+    argsouter = [0.1, 10, np.deg2rad(70), 3/2 * np.pi, 4.7 , 2, 0]
     args = np.append(argsinner, argsouter)
-    m1=0.3
-    m2=1.4
-    m3=0.01
+    m1=1
+    m2=1
+    m3=1
 
     triple = Triple(m1,m2,m3,*args)
     triple.calc_state_vector()
