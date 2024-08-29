@@ -658,8 +658,8 @@ if __name__ =="__main__":
     argsouter = [0.1, 10, np.deg2rad(70), 3/2 * np.pi, 4.7 , 2, 0]
     args = np.append(argsinner, argsouter)
     m1=1
-    m2=1
-    m3=1
+    m2=0.4
+    m3=0.01
 
     triple = Triple(m1,m2,m3,*args)
     triple.calc_state_vector()
