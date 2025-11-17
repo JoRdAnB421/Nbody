@@ -75,7 +75,7 @@ point3, = ax.plot([], [], [], 'o')
 
 ax.legend()
 ax.grid(False)
-trail_length = 20
+trail_length = 100
 
 def update(frame):
     # Update the trace of the components

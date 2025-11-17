@@ -655,11 +655,11 @@ if __name__ =="__main__":
     ############## Create a triple
     # Ecc, semi, incl, Omega, omega, theta, t0
     argsinner = [0.8, 5, np.deg2rad(24), np.pi/3, np.deg2rad(120), 4.3, 0]
-    argsouter = [0.1, 10, np.deg2rad(70), 3/2 * np.pi, 4.7 , 2, 0]
+    argsouter = [0.1, 7, np.deg2rad(70), 3/2 * np.pi, 4.7 , 2, 0]
     args = np.append(argsinner, argsouter)
     m1=1
     m2=0.4
-    m3=0.01
+    m3=0.5
 
     triple = Triple(m1,m2,m3,*args)
     triple.calc_state_vector()
